@@ -1,1 +1,55 @@
 
+from requests import Request, Session
+from requests_aws4auth import AWS4Auth
+from datetime import datetime
+import os
+import boto3
+
+def get_log_events(log_group):
+
+    os.environ["HTTP_PROXY"] = "http://sseetala:Spring2019@cr-proxy.us.aegon.com:9090"
+    os.environ["HTTPS_PROXY"] = "http://sseetala:Spring2019@cr-proxy.us.aegon.com:9090"
+
+    ADName = 'sseetala'
+    ADPassword = '*****'
+
+    s = Session()
+    AWSAccountNumber = '969859503720'
+    AWSRole = 'UENTAWSDEVOPSTRAINING'
+    url = "https://awsapi.us.aegon.com/default.aspx"
+    payload = {"method":"usernameroleaccount","username":ADName,"password":ADPassword,"account":AWSAccountNumber,"role":AWSRole}
+    req = Request('POST', url, data=payload)
+    prepped = req.prepare()
+
+    resp = s.send(prepped,
+        stream=True,
+        verify=False
+    )
+    creds = resp.content.decode().split(',')
+    AccessKey = creds[2]
+    SecretAccessKey = creds[0]
+    SessionToken = creds[1]
+    #print("PrintedAccesskey:", AccessKey)
+    #print("PrintedSecretkey:", SecretAccessKey)
+    #print("PrintedSessionToken:", SessionToken)
+    client = boto3.client('logs', region_name='us-east-1', aws_access_key_id=AccessKey, aws_secret_access_key=SecretAccessKey,aws_session_token=SessionToken)
+    kwargs = {
+    'logGroupName': log_group,
+    #'filterPattern': '{$.message = "agt-iam-old-access-keys"}',
+    'filterPattern': 'Sending policy',
+    #'startTime': 1557015896,
+    #'endTime': 1557102296,
+    'limit': 10000
+    }
+    while True:
+       response = client.filter_log_events(**kwargs)
+       yield from response['events']
+       try:
+          kwargs['nextToken'] = response['nextToken']
+       except KeyError:
+          break
+    return response['events']
+
+if __name__ == '__main__':
+    for event in get_log_events('/aws/lambda/cloud-custodian-mailer'):
+      print(event['message'].rstrip())
